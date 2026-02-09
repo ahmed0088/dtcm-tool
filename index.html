@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>DTCM Reconciliation Tool</title>
+  <script src="https://unpkg.com/fast-xml-parser@4.4.1/dist/fast-xml-parser.min.js"></script>
+  <script src="https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
+  <style>
+    body { font-family: system-ui, sans-serif; background: #f8fafc; color: #1e293b; margin: 0; padding: 30px; line-height: 1.6; }
+    .container { max-width: 1440px; margin: 0 auto; }
+    h1 { text-align: center; color: #1e40af; margin-bottom: 40px; font-size: 2.5rem; }
+
+    .upload-area {
+      background: white; border-radius: 16px; padding: 40px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.08); text-align: center; margin-bottom: 60px;
+    }
+    .file-grid {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 28px; margin: 40px 0;
+    }
+    .file-card {
+      background: #f8fafc; border: 2px solid #e2e8f0; border-radius: 16px; padding: 32px 24px;
+      text-align: center; cursor: pointer; transition: all 0.3s;
+    }
+    .file-card:hover { border-color: #3b82f6; box-shadow: 0 12px 32px rgba(0,0,0,0.12); transform: translateY(-4px); }
+    .file-card.selected { border-color: #10b981; background: #f0fdf4; }
+    .file-label { font-size: 1.3rem; font-weight: 700; margin-bottom: 12px; }
+    .file-desc { color: #64748b; margin-bottom: 16px; font-size: 0.95rem; }
+    .file-name { color: #1d4ed8; font-weight: 600; min-height: 48px; word-break: break-all; }
+
+    .analyze-btn {
+      padding: 16px 80px; background: #1e40af; color: white; border: none; border-radius: 12px;
+      font-size: 1.35rem; font-weight: 700; cursor: pointer; margin-top: 40px; transition: all 0.3s;
+    }
+    .analyze-btn:hover { background: #1d4ed8; transform: translateY(-2px); }
+    .analyze-btn:disabled { background: #9ca3af; cursor: not-allowed; }
+
+    #loading-overlay {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.65); display: none;
+      align-items: center; justify-content: center; z-index: 9999;
+    }
+    .loading-box {
+      background: white; padding: 70px 100px; border-radius: 20px;
+      box-shadow: 0 15px 50px rgba(0,0,0,0.45); text-align: center;
+    }
+    .spinner { font-size: 6rem; color: #3b82f6; margin-bottom: 30px; animation: spin 1.2s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .dashboard { display: none; margin-top: 50px; }
+    .stats-grid {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 24px; margin-bottom: 20px;
+    }
+    .stat-card {
+      background: white; border-radius: 16px; padding: 24px; box-shadow: 0 8px 25px rgba(0,0,0,0.07); text-align: center;
+    }
+    .stat-number { font-size: 2.8rem; font-weight: 800; color: #1e40af; }
+    .stat-label { color: #64748b; font-size: 1rem; margin-top: 8px; }
+
+    .td-comparison {
+      text-align: center; margin: 20px 0 40px; font-size: 1.08rem; color: #334155; font-weight: 500;
+      background: #f8fafc; padding: 12px; border-radius: 10px; border: 1px solid #e2e8f0;
+    }
+    .td-comparison strong { color: #1e293b; }
+    .td-comparison .match { color: #16a34a; font-weight: 600; }
+    .td-comparison .diff { color: #dc2626; font-weight: 600; }
+
+    details { margin-bottom: 48px; background: white; border-radius: 16px; box-shadow: 0 8px 25px rgba(0,0,0,0.07); overflow: hidden; }
+    summary {
+      padding: 24px; font-size: 1.5rem; font-weight: 700; cursor: pointer;
+      display: flex; align-items: center; gap: 14px;
+    }
+    summary.no-checkin { background: #dc2626; color: white; }
+    summary.priority { background: #b91c1c; color: white; }
+    summary:hover { opacity: 0.93; }
+
+    .table-container { padding: 32px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 16px 20px; text-align: left; border-bottom: 1px solid #e2e8f0; }
+    th { font-weight: 600; background: #f1f5f9; }
+    tr:nth-child(even) { background: #f8fafc; }
+    tr:hover { background: rgba(59,130,246,0.08); }
+    .no-checkin-row { background: #fee2e2 !important; border-left: 6px solid #dc2626; }
+    .priority-row { background: #fed7d7 !important; border-left: 6px solid #991b1b; }
+    .name-warning { color: #d97706; font-weight: 700; }
+
+    .export-btn {
+      padding: 18px 80px; background: #16a34a; color: white; border: none; border-radius: 12px;
+      font-size: 1.3rem; font-weight: 700; cursor: pointer; margin: 70px auto; display: block;
+    }
+
+    .missing-files { color: #dc2626; font-weight: 600; margin-top: 12px; font-size: 1.1rem; }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <h1>DTCM Reconciliation Tool</h1>
+
+  <div class="upload-area">
+    <h2>Upload Reports</h2>
+    <p>Select multiple files at once — they will be automatically assigned</p>
+
+    <div class="file-grid">
+      <div class="file-card" data-type="arrival">
+        <div class="file-label">Arrival Report</div>
+        <div class="file-desc">Opera Arrival List (XML)</div>
+        <div id="name-arrival" class="file-name">Not selected</div>
+      </div>
+      <div class="file-card" data-type="transactions">
+        <div class="file-label">DTCM Transactions</div>
+        <div class="file-desc">HotelTransactionReport_Dynamic.xml</div>
+        <div id="name-transactions" class="file-name">Not selected</div>
+      </div>
+      <div class="file-card" data-type="departures">
+        <div class="file-label">Departures Report</div>
+        <div class="file-desc">Optional – Opera Departures</div>
+        <div id="name-departures" class="file-name">Not selected</div>
+      </div>
+      <div class="file-card" data-type="td">
+        <div class="file-label">TD Postings Report</div>
+        <div class="file-desc">Opera 7510 postings (for first-night TD count)</div>
+        <div id="name-td" class="file-name">Not selected</div>
+      </div>
+    </div>
+
+    <button class="analyze-btn" id="analyzeBtn" disabled>Analyze Reports</button>
+    <div id="fileStatus" class="missing-files" style="display:none;">Please upload Arrival and DTCM Transactions files</div>
+  </div>
+
+  <div id="loading-overlay">
+    <div class="loading-box">
+      <div class="spinner"><i class="fas fa-spinner fa-spin"></i></div>
+      <h3>Processing...</h3>
+      <p>Matching records & calculating totals...</p>
+    </div>
+  </div>
+
+  <div id="dashboard">
+    <div class="stats-grid" id="stats"></div>
+
+    <div class="td-comparison">
+      <strong>DTCM:</strong> <span id="tdDTCM">— AED</span>
+      &nbsp;&nbsp;&nbsp; vs &nbsp;&nbsp;&nbsp;
+      <strong>Opera (first night):</strong> <span id="tdOpera">— AED</span>
+      <span id="tdStatus" style="margin-left: 24px;"></span>
+    </div>
+
+    <!-- No DTCM Check-in – always open -->
+    <details open>
+      <summary class="no-checkin"><i class="fas fa-times-circle"></i> No DTCM Check-in Record</summary>
+      <div class="table-container">
+        <table>
+          <thead>
+            <tr>
+              <th>Room</th>
+              <th>Guest (Opera)</th>
+              <th>Expected Arrival</th>
+              <th>Guest (DTCM)</th>
+              <th>Check-in (DTCM)</th>
+              <th>TD Dates</th>
+              <th>Issue</th>
+            </tr>
+          </thead>
+          <tbody id="noCheckinBody"></tbody>
+        </table>
+      </div>
+    </details>
+
+    <!-- Checked-in but missing DTCM -->
+    <details>
+      <summary class="priority"><i class="fas fa-exclamation-triangle"></i> Checked-in but Missing DTCM Record</summary>
+      <div class="table-container">
+        <table>
+          <thead>
+            <tr>
+              <th>Room</th>
+              <th>Guest (Opera)</th>
+              <th>Expected Arrival</th>
+              <th>Guest (DTCM)</th>
+              <th>Check-in (DTCM)</th>
+              <th>TD Dates</th>
+              <th>Issue</th>
+            </tr>
+          </thead>
+          <tbody id="priorityBody"></tbody>
+        </table>
+      </div>
+    </details>
+
+    <button class="export-btn" id="exportBtn" style="display:none;">
+      <i class="fas fa-file-excel"></i> Download Excel Report
+    </button>
+  </div>
+</div>
+
+<input type="file" id="fileInput" multiple accept=".xml,.xlsx,.xls" style="display:none;">
+
+<script>
+  const fileInput = document.getElementById('fileInput');
+  const analyzeBtn = document.getElementById('analyzeBtn');
+  const fileStatus = document.getElementById('fileStatus');
+  let loadedFiles = {};
+
+  document.querySelectorAll('.file-card').forEach(card => {
+    card.addEventListener('click', () => {
+      fileInput.dataset.target = card.dataset.type;
+      fileInput.click();
+    });
+
+    card.addEventListener('dragover', e => { e.preventDefault(); card.classList.add('selected'); });
+    card.addEventListener('dragleave', () => card.classList.remove('selected'));
+    card.addEventListener('drop', e => {
+      e.preventDefault();
+      card.classList.remove('selected');
+      handleFiles(e.dataTransfer.files);
+    });
+  });
+
+  fileInput.addEventListener('change', e => {
+    if (e.target.files.length) handleFiles(e.target.files);
+    fileInput.value = '';
+  });
+
+  function handleFiles(files) {
+    for (const file of files) {
+      const name = file.name.toLowerCase();
+      let type = null;
+
+      if (/arrival|res_detail|arr/i.test(name)) type = 'arrival';
+      else if (/departure|depart/i.test(name)) type = 'departures';
+      else if (/transaction|dynamic|dtcm|hoteltransaction/i.test(name)) type = 'transactions';
+      else if (/td|7510|tourism|dirham|posting|finjrnl/i.test(name)) type = 'td';
+
+      if (type) {
+        loadedFiles[type] = file;
+        document.getElementById(`name-${type}`).textContent = file.name;
+        document.querySelector(`.file-card[data-type="${type}"]`)?.classList.add('selected');
+      }
+    }
+
+    const hasRequired = !!(loadedFiles.arrival && loadedFiles.transactions);
+    analyzeBtn.disabled = !hasRequired;
+    fileStatus.style.display = hasRequired ? 'none' : 'block';
+  }
+
+  function parseDate(str) {
+    if (!str) return null;
+    str = str.trim().split(' ')[0];
+    let parts = str.split(/[-/]/);
+    if (parts.length !== 3) return new Date(str);
+    let [p1, p2, p3] = parts.map(Number);
+    if (p1 >= 1 && p1 <= 12) return new Date(p3, p1 - 1, p2);
+    return new Date(p3, p2 - 1, p1);
+  }
+
+  function datesMatch(d1, d2) {
+    if (!d1 || !d2) return false;
+    const date1 = parseDate(d1);
+    const date2 = parseDate(d2);
+    return date1 && date2 && date1.toDateString() === date2.toDateString();
+  }
+
+  function cleanName(name) {
+    if (!name) return '';
+    return name.toLowerCase()
+      .replace(/\b(mr|ms|mrs|dr|prof)\b\.?/gi, '')
+      .replace(/,/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  function namesSimilar(n1, n2) {
+    if (!n1 || !n2) return false;
+    const c1 = cleanName(n1);
+    const c2 = cleanName(n2);
+    return c1 === c2 || c1.includes(c2) || c2.includes(c1);
+  }
+
+  async function startAnalysis() {
+    document.getElementById('loading-overlay').style.display = 'flex';
+    analyzeBtn.disabled = true;
+
+    const parser = new DOMParser();
+    const filesContent = {};
+
+    for (const [key, file] of Object.entries(loadedFiles)) {
+      try { filesContent[key] = await file.text(); }
+      catch (err) { console.error(`Failed to read ${key}:`, err); }
+    }
+
+    let arrivals = [], transactions = [], tdRecords = [];
+    let totalTD_DTCM = 0;
+    let totalTD_Opera_FirstNight = 0;
+
+    // ── DTCM side ───────────────────────────────────────────────────────
+    if (filesContent.transactions) {
+      const xml = parser.parseFromString(filesContent.transactions, "text/xml");
+      xml.querySelectorAll('Details').forEach(d => {
+        if (d.getAttribute('TDFees') === '10') {
+          const room = d.getAttribute('RoomNumber')?.replace(/^0+/, '') || '';
+          const guest = d.getAttribute('MainGuestName') || '';
+          const checkin = d.getAttribute('Check_In_EffectiveDateTime') || '';
+          const amount = parseFloat(d.getAttribute('Amount') || 0);
+          totalTD_DTCM += amount;
+          if (room) transactions.push({ Room: room, Guest_actual: guest, Checkin_date: checkin });
+        }
+      });
+
+      // Also try to read the summary total from Tablix1 if present
+      const tablix = xml.querySelector('Tablix1');
+      if (tablix) {
+        const finalFees = tablix.getAttribute('FinalFees_21');
+        if (finalFees) {
+          totalTD_DTCM = parseFloat(finalFees) || totalTD_DTCM;
+        }
+      }
+    }
+
+    // ── Opera side – first night only (10 AED per room on first TD date) ─────
+    if (filesContent.td) {
+      const xml = parser.parseFromString(filesContent.td, "text/xml");
+      const seenRooms = new Set();
+
+      xml.querySelectorAll('G_TRX_CHAR_DATE').forEach(e => {
+        const desc = e.querySelector('TRX_DESC')?.textContent?.toLowerCase() || '';
+        if (desc.includes('tourism dirham') || desc.includes('7510')) {
+          const room = e.querySelector('ROOM')?.textContent?.trim()?.replace(/^0+/, '');
+          const date = e.querySelector('BUSINESS_DATE, BUSINESS_FORMAT_DATE')?.textContent?.trim() || '';
+          if (room && date && !seenRooms.has(room)) {
+            seenRooms.add(room);
+            totalTD_Opera_FirstNight += 10; // 10 AED per room on first night
+            tdRecords.push({ Room: room, TD_date: date });
+          }
+        }
+      });
+    }
+
+    // ── Process arrivals & matching ─────────────────────────────────────
+    if (filesContent.arrival) {
+      const xml = parser.parseFromString(filesContent.arrival, "text/xml");
+      xml.querySelectorAll('G_RESERVATION').forEach(node => {
+        const room = node.querySelector('ROOM_NO, DISP_ROOM_NO')?.textContent?.trim()?.replace(/^0+/, '');
+        const guest = node.querySelector('FULL_NAME, FULL_NAME_NO_SHR_IND')?.textContent?.trim();
+        const arr = node.querySelector('ARRIVAL, BEGIN_DATE')?.textContent?.trim();
+        if (room && guest) arrivals.push({ Room: room, Guest_expected: guest, Expected_arrival: arr || '' });
+      });
+    }
+
+    const merged = arrivals.map(a => {
+      let matchedT = null;
+      let minDiff = Infinity;
+
+      transactions.forEach(t => {
+        if (t.Room === a.Room) {
+          const diff = Math.abs(parseDate(t.Checkin_date) - parseDate(a.Expected_arrival)) / (1000 * 60 * 60 * 24);
+          if (diff < minDiff) { minDiff = diff; matchedT = t; }
+        }
+      });
+
+      const tds = tdRecords.filter(td => td.Room === a.Room);
+      return { ...a, ...matchedT, TD_dates: tds.map(td => td.TD_date).join(', ') || 'None' };
+    });
+
+    merged.forEach(r => {
+      r.HasCheckin = !!r.Checkin_date && r.Checkin_date.trim() !== '';
+      r.HasTD = r.TD_dates !== 'None';
+      r.MissingDTCM = !datesMatch(r.Expected_arrival, r.Checkin_date);
+      r.NameIssue = r.Guest_actual && !namesSimilar(r.Guest_expected, r.Guest_actual);
+    });
+
+    const noCheckinCount = merged.filter(r => r.MissingDTCM && !r.HasCheckin).length;
+    const checkedInMissingCount = merged.filter(r => r.MissingDTCM && r.HasCheckin).length;
+
+    // ── Stats ───────────────────────────────────────────────────────────
+    document.getElementById('stats').innerHTML = `
+      <div class="stat-card"><div class="stat-number">${arrivals.length}</div><div class="stat-label">Expected</div></div>
+      <div class="stat-card"><div class="stat-number">${transactions.length}</div><div class="stat-label">DTCM Records</div></div>
+      <div class="stat-card"><div class="stat-number">${noCheckinCount}</div><div class="stat-label">No Check-in</div></div>
+      <div class="stat-card"><div class="stat-number">${checkedInMissingCount}</div><div class="stat-label">Missing DTCM</div></div>
+    `;
+
+    // ── TD comparison ───────────────────────────────────────────────────
+    document.getElementById('tdDTCM').textContent = totalTD_DTCM.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' AED';
+    document.getElementById('tdOpera').textContent = totalTD_Opera_FirstNight.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' AED';
+
+    let statusHtml = '';
+    if (totalTD_DTCM > 0 || totalTD_Opera_FirstNight > 0) {
+      if (totalTD_DTCM === totalTD_Opera_FirstNight) {
+        statusHtml = '<span class="match">Match ✓</span>';
+      } else {
+        const diff = totalTD_DTCM - totalTD_Opera_FirstNight;
+        const diffAbs = Math.abs(diff).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        statusHtml = `<span class="diff">${diff > 0 ? 'DTCM +' : 'Opera +'} ${diffAbs} AED</span>`;
+      }
+    } else {
+      statusHtml = '<span style="color:#64748b;">(No TD data found)</span>';
+    }
+
+    document.getElementById('tdStatus').innerHTML = statusHtml;
+
+    // ── Tables ──────────────────────────────────────────────────────────
+    const noCheckinBody = document.getElementById('noCheckinBody');
+    const priorityBody = document.getElementById('priorityBody');
+    noCheckinBody.innerHTML = ''; priorityBody.innerHTML = '';
+
+    merged.filter(r => r.MissingDTCM && !r.HasCheckin).forEach(r => {
+      const tr = document.createElement('tr');
+      tr.className = 'no-checkin-row';
+      tr.innerHTML = `
+        <td>${r.Room}</td>
+        <td>${r.Guest_expected || '—'}</td>
+        <td>${r.Expected_arrival || '—'}</td>
+        <td>${r.Guest_actual || '—'}</td>
+        <td>${r.Checkin_date || 'None'}</td>
+        <td>${r.TD_dates}</td>
+        <td><span style="color:#dc2626;font-weight:700;">No DTCM Check-in</span>${r.NameIssue ? '<br><span class="name-warning">⚠️ Name mismatch</span>' : ''}</td>
+      `;
+      noCheckinBody.appendChild(tr);
+    });
+
+    merged.filter(r => r.MissingDTCM && r.HasCheckin).forEach(r => {
+      const tr = document.createElement('tr');
+      tr.className = 'priority-row';
+      tr.innerHTML = `
+        <td>${r.Room}</td>
+        <td>${r.Guest_expected || '—'}</td>
+        <td>${r.Expected_arrival || '—'}</td>
+        <td>${r.Guest_actual || '—'}</td>
+        <td>${r.Checkin_date || 'None'}</td>
+        <td>${r.TD_dates}</td>
+        <td><span style="color:#991b1b;font-weight:700;">Missing DTCM Record</span>${r.NameIssue ? '<br><span class="name-warning">⚠️ Name mismatch</span>' : ''}</td>
+      `;
+      priorityBody.appendChild(tr);
+    });
+
+    if (merged.length === 0) {
+      const msg = '<tr><td colspan="7" style="text-align:center;padding:24px;">No data or no issues found</td></tr>';
+      noCheckinBody.innerHTML = msg;
+      priorityBody.innerHTML = msg;
+    }
+
+    document.getElementById('dashboard').style.display = 'block';
+    document.getElementById('loading-overlay').style.display = 'none';
+    analyzeBtn.disabled = false;
+    document.getElementById('exportBtn').style.display = 'block';
+
+    window.exportData = merged.map(r => ({
+      Room: r.Room,
+      "Guest (Opera)": r.Guest_expected,
+      "Expected Arrival": r.Expected_arrival,
+      "Guest (DTCM)": r.Guest_actual || '',
+      "Check-in (DTCM)": r.Checkin_date || 'None',
+      "TD Dates": r.TD_dates,
+      Issue: [
+        r.MissingDTCM ? (r.HasCheckin ? 'Checked-in but Missing DTCM' : 'No DTCM Check-in') : '',
+        r.NameIssue ? 'Name mismatch' : ''
+      ].filter(Boolean).join(' + ')
+    }));
+  }
+
+  analyzeBtn.addEventListener('click', startAnalysis);
+
+  document.getElementById('exportBtn').onclick = () => {
+    if (!window.exportData) return;
+    const ws = XLSX.utils.json_to_sheet(window.exportData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "DTCM_Issues");
+    XLSX.writeFile(wb, "DTCM_Reconciliation_Report.xlsx");
+  };
+</script>
+</body>
+</html>
